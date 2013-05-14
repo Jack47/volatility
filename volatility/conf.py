@@ -68,10 +68,12 @@ configuration information:
    configuration
    
 """
+import pdb
 import ConfigParser
 import optparse
 import os
 import sys
+import shlex
 
 default_config = "/etc/volatilityrc"
 
@@ -210,6 +212,33 @@ class ConfObject(object):
     def set_help_hook(self, cb):
         self.optparser.help_hooks = [cb]
 
+    #csd
+    def parse_options_from_string(self, argv, final=True):
+       pdb.set_trace()
+       self.optparser.final = final
+       try: 
+	(opts, args) = self.optparser.parse_args(shlex.split(argv))
+        self.opts.clear()
+            ## Update our cmdline dict:
+        for k in dir(opts):
+                v = getattr(opts, k)
+                if k in self.options and not v == None:
+                    self.opts[k] = v
+
+
+       except UnboundLocalError:
+            raise RuntimeError("Unknown option - use -h to see help")
+
+        ## If error() was called we catch it here
+       except RuntimeError:
+            opts = {}
+            ## This gives us as much as was parsed so far
+            args = self.optparser.largs
+
+       self.optparse_opts = opts
+       self.args = args
+       self.ProcessFinal(final)
+    
     def parse_options(self, final = True):
         """ Parses the options from command line and any conf files
         currently added.
@@ -243,6 +272,9 @@ class ConfObject(object):
 
         self.optparse_opts = opts
         self.args = args
+	self.ProcessFinal(final)
+
+    def ProcessFinal(self, final):
 
         if final:
             ## Reparse the config file again:
