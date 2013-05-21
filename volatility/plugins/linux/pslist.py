@@ -20,7 +20,7 @@
 @contact:      atcuno@gmail.com
 @organization: Digital Forensics Solutions
 """
-
+import pdb
 import volatility.obj as obj
 import volatility.plugins.linux.common as linux_common
 
@@ -32,7 +32,11 @@ class linux_pslist(linux_common.AbstractLinuxCommand):
         config.add_option('PID', short_option = 'p', default = None,
                           help = 'Operate on these Process IDs (comma-separated)',
                           action = 'store', type = 'str')
+        config.add_option('PROCNAMES', short_option = 'c', default = None,
+                          help = 'Operate on these Process names (comma-separated)',
+                          action = 'store', type = 'str')
 
+        pdb.set_trace	
     def calculate(self):
         linux_common.set_plugin_members(self)
         init_task_addr = self.get_profile_symbol("init_task")
@@ -40,15 +44,27 @@ class linux_pslist(linux_common.AbstractLinuxCommand):
         init_task = obj.Object("task_struct", vm = self.addr_space, offset = init_task_addr)
 
         pidlist = self._config.PID
+	pnamelist = self._config.PROCNAMES
+        #pdb.set_trace	
+
         if pidlist:
             pidlist = [int(p) for p in self._config.PID.split(',')]
+	if pnamelist:
+	    pnamelist = [str(q) for q in self._config.PROCNAMES.split(',')]
 
+	print pidlist
+	print pnamelist
         # walk the ->tasks list, note that this will *not* display "swapper"
         for task in init_task.tasks:
-
-            if not pidlist or task.pid in pidlist:
-
-                yield task
+	  type(task.comm)
+	  #print task.comm 
+	  if not pidlist and not pnamelist:
+		yield task
+	  else: 
+		if pidlist and task.pid in pidlist:
+			yield task
+	        if pnamelist and str(task.comm) in pnamelist:
+			yield task
 
     def render_text(self, outfd, data):
 

@@ -80,7 +80,11 @@ class Command(object):
         some data, the function should return a generator.
         """
 
+    def execute_call(self):
+        """ Executes the plugin command. and return the result"""
+        data = self.calculate()
 
+	return data	
     def execute(self):
         """ Executes the plugin command."""
         ## Executing plugins is done in two stages - first we calculate
