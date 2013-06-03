@@ -214,10 +214,10 @@ class ConfObject(object):
 
     #csd
     def parse_options_from_string(self, argv, final=True):
-       pdb.set_trace()
+       #pdb.set_trace()
        self.optparser.final = final
        try: 
-	(opts, args) = self.optparser.parse_args(shlex.split(argv))
+	(opts, args) = self.optparser.parse_args(shlex.split(argv.encode('utf8') ))
         self.opts.clear()
             ## Update our cmdline dict:
         for k in dir(opts):
