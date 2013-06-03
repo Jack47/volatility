@@ -5,6 +5,10 @@
 
 import pdb
 import sys
+import kvm
+import logging
+import unix
+import time
 
 if sys.version_info < (2, 6, 0):
     sys.stderr.write("Volatility requires python version 2.6, please upgrade your python installation.")
@@ -32,7 +36,8 @@ import volatility.debug as debug
 import volatility.addrspace as addrspace
 import volatility.commands as commands
 import volatility.scan as scan
-
+from VmCheckConfig import GetVmCheckConfigs
+import VmCheckConfig as VmCheckConfig
 #config.add_option("INFO", default = None, action = "store_true",
                   #cache_invalidator = False,
                   #help = "Print information about all registered objects")
@@ -69,6 +74,7 @@ class Volatility(object):
 	def ExecuteCommand(self, vmname, command):
 	    location = "-l vmi://"+vmname;
 	    argv = self.profile+" "+location+" "+command
+ 	    #pdb.set_trace()
 	    self.config.parse_options_from_string(argv, False)
 	    module  = self.GetModule(self.config)
 	    return self.ExecuteModule(module, argv)
@@ -140,64 +146,89 @@ class Volatility(object):
 	    self.cmds = registry.get_plugin_classes(commands.Command, lower = True)
 	    
 class MonitorCmd(object):
-	pname = {}
+	rpmap= {} # [pname] = ploc
 	isRestoreSnapShot = False	
 	isRestartVM = False
 	vmname = ""
-	def __init__(self, vmname):
-		self.vmname = vmname	
+	kvm_host = kvm.KVM(unix.Local())
 
-	def AddRestartProcess(self, pname):
-		if pname not in self.pname:
-			self.pname.add(pname)	
+	def __init__(self, vmname, hostinfo):
+		self.vmname = vmname	
+		self.user = hostinfo['username'] 
+		self.password= hostinfo['password'] 
+		self.ip = hostinfo['ip'] 
+
+	def AddRestartProcess(self, pname, ploc):
+		if pname not in self.rpmap:
+			self.rpmap[pname] = ploc	
 	def SetRestoreSnapShot(self):
 		self.isRestoreSnapShot = True
 	def SetRestartVM(self):
 		self.isRestartVM = True
 	def Execute(self):
-		pdb.set_trace()
-		print "Action"+self.vmname
+		#pdb.set_trace()
+		print "Action "+self.vmname
+		
 		if self.isRestoreSnapShot:
 			print "\tRestoreing from snapshot"
+			#r = self.kvm_host.destroy(self.vmname)			
+			
 		elif self.isRestartVM:
 			print "\tRestarting vm"
-		elif self.pname:	
-			pnames = ""
- 			for p in self.pname :
-				pnames.append(p+",")
+			r = self.kvm_host.destroy(self.vmname)			
+			logging.info(r[1])
+			r = self.kvm_host.start(self.vmname)
+			logging.info(r[1])
+		elif self.rpmap:	
+			h = unix.Remote()
+			h.connect(self.ip,username=self.user, password=self.password)
 			print "\tRestarting process\t"+ pnames
-
-class VmCheckConfig(object):
-	processList = {'sshd':"restartP", 'gnome':"restartV", 'kvm':"restore"}
- 	vmname = ""
-	def __init__(self, vmname):
-		self.vmname = vmname
-	def GetProcessMap(self):
-		return self.processList;
-	def GetVmName(self):
-		return self.vmname
-		
-def CheckVMS():
-	vm01config = VmCheckConfig("vm01")
-	vm02config = VmCheckConfig("vm02")
-	vmxpconfig = VmCheckConfig("vm_xp")
-	vmcfgs = [ vm02config, vmxpconfig]
-#	vmcfgs = [vm01config, vm02config ]
+ 			for (k, v)  in sorted(self.rpmap.items):
+				r = h.execute(v)	
+				print k+"\t"+r
 	
-	for vmcfg in vmcfgs:
-		print "Checking VMs:"+" "+vmcfg.GetVmName()
-		vmCmd = MonitorCmd( vmcfg.GetVmName())	
-		CheckVMProcess(vmcfg, vmCmd)
-		CheckVMSystemCall(vmcfg, vmCmd)
-		vmCmd.Execute()
+def CheckVMS():
 
+	vmcfgs = GetVmCheckConfigs("./vms.cfg")
+	#pdb.set_trace()
+	kvm_host = kvm.KVM(unix.Local())
+	kvm_vms = kvm_host.vms
+#	vmcfgs = [vm01config, vm02config ]
+	for vmcfg in vmcfgs:
+		if vmcfg.GetVmName() not in kvm_vms :
+			logging.warning(vmcfg.GetVmName()+" is not available!")
+			vmcfgs.remove(vmcfg.GetVmName())
+
+	while True:
+		for vmcfg in vmcfgs:
+			if kvm_host.state(vmcfg.GetVmName()) == 'shut off':
+				logging.warning(vmcfg.GetVmName()+" is not running")				
+				continue
+
+			try:
+				print "Checking VMs:"+" "+vmcfg.GetVmName()
+				hostinfo = vmcfg.GetHostInfo()
+				vmCmd = MonitorCmd( vmcfg.GetVmName(), hostinfo)	
+				CheckVMProcess(vmcfg, vmCmd)
+				CheckVMSystemCall(vmcfg, vmCmd)
+				vmCmd.Execute()
+			except exceptions.AddrSpaceError:
+				logging.error(vmcfg.GetVmName()+" profile is not valid")
+			except Exception, e:
+				logging.exception(e)
+		time.sleep(20)
+# can move this method to vmCmd
 def ProcessActionStr(pname, action, vmCmd):
-	if action == "restartP":
-		vmCmd.AddRestartProcess(pname)
-	elif action == "restore":
+
+	logging.info(pname+" is stopped, need "+action[0])
+	if action[0] == "restartP":
+		vmCmd.AddRestartProcess(pname, action[1])
+	elif action[0] == "restoreV":
 		vmCmd.SetRestoreSnapShot()
-	elif action == "restartV":
+	elif action[0] == "restartV":
 		vmCmd.SetRestartVM()
+	else :
+		logging.error("Unknowing action")
 		
 def CheckVMProcess(vmcfg, vmCmd):
 		
@@ -206,7 +237,7 @@ def CheckVMProcess(vmcfg, vmCmd):
 	#pdb.set_trace()
 
 	for k,v in sorted(processMap.items()):
-		print k+" "+v
+		#print k+" "+v
 		if k not in vmProcessList:
 			ProcessActionStr(k, v, vmCmd) 
 def CheckVMSystemCall(vmcfg, vmCmd):
@@ -215,17 +246,18 @@ def CheckVMSystemCall(vmcfg, vmCmd):
 	   
 if __name__ == "__main__":
     #config.add_help_hook(list_plugins)
-    vmlist = { 'vm02':'', '':''}
-    
+    logging.basicConfig(level=logging.INFO, filename='csdvmm.log')
+    logging.info('Starting program')
+	 
     try:
 	
         volatility = Volatility() 
-	data = volatility.Check_Process("vm02")
 	#pdb.set_trace()	
 	CheckVMS()
     except Exception, ex:
         #if config.DEBUG:
             debug.post_mortem()
+	    logging.exception(ex)
         #else:
         #    raise
     except KeyboardInterrupt:
