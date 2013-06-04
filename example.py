@@ -2,13 +2,15 @@
 #  -*- mode: python; -*-
 
 #pylint: disable-msg=C0111
-
+import thread
+from threading import Thread
 import pdb
 import sys
 import kvm
 import logging
 import unix
 import time
+import os
 
 if sys.version_info < (2, 6, 0):
     sys.stderr.write("Volatility requires python version 2.6, please upgrade your python installation.")
@@ -70,10 +72,22 @@ class Volatility(object):
 		
 	def Check_Process(self, vmname):
 	   return self.ExecuteCommand(vmname, "linux_pslist")
+	def Check_ProcessDump(self, vmname, pname):
+	   outfile = "./tmp/"+pname+".2"
+	   if not os.path.exists("./tmp"):
+		os.makedirs("./tmp")
+ 
+	   self.ExecuteCommand(vmname, "linux_dump_proc_map",pname, outfile )
 
-	def ExecuteCommand(self, vmname, command):
+	def ExecuteCommand(self, vmname, command, pname = None, outfile=None):
 	    location = "-l vmi://"+vmname;
-	    argv = self.profile+" "+location+" "+command
+	    
+	    argv = self.profile+" "+location+" ";
+	    if pname :
+		argv+="-n "+pname+" "
+	    if outfile :
+		argv+="-O "+outfile+" "
+	    argv+=command
  	    #pdb.set_trace()
 	    self.config.parse_options_from_string(argv, False)
 	    module  = self.GetModule(self.config)
@@ -166,7 +180,7 @@ class MonitorCmd(object):
 	def SetRestartVM(self):
 		self.isRestartVM = True
 	def Execute(self):
-		#pdb.set_trace()
+		print "Execute monitor cmd"
 		print "Action "+self.vmname
 		
 		if self.isRestoreSnapShot:
@@ -180,12 +194,25 @@ class MonitorCmd(object):
 			r = self.kvm_host.start(self.vmname)
 			logging.info(r[1])
 		elif self.rpmap:	
+			print "\tRestarting process\t" 
+	#		pdb.set_trace()
 			h = unix.Remote()
 			h.connect(self.ip,username=self.user, password=self.password)
-			print "\tRestarting process\t"+ pnames
- 			for (k, v)  in sorted(self.rpmap.items):
-				r = h.execute(v)	
-				print k+"\t"+r
+			msg = self.vmname+" Restarting process:\t" 
+			rplist = []
+			for (k, v)  in sorted(self.rpmap.items()):
+				rplist.append(v)
+ 				
+			#thread.start_new_thread(ExecuteCMDInVm, (self.rpmap, msg, h))
+			try:
+				Thread(target=ExecuteCMDInVm, args=(msg,rplist, h)).start()
+			except Exception, errtxt:
+			 	logging.error(errtxt)
+def ExecuteCMDInVm(msg, rplist, h):
+	for v in rplist:
+		r = h.execute(v)	
+		print msg+"\t"+v+"\t"+str(r[0])
+
 	
 def CheckVMS():
 
@@ -211,11 +238,13 @@ def CheckVMS():
 				vmCmd = MonitorCmd( vmcfg.GetVmName(), hostinfo)	
 				CheckVMProcess(vmcfg, vmCmd)
 				CheckVMSystemCall(vmcfg, vmCmd)
+				CheckVMProcMemory(vmcfg, vmCmd)
 				vmCmd.Execute()
 			except exceptions.AddrSpaceError:
 				logging.error(vmcfg.GetVmName()+" profile is not valid")
 			except Exception, e:
 				logging.exception(e)
+		print "sleep 20"
 		time.sleep(20)
 # can move this method to vmCmd
 def ProcessActionStr(pname, action, vmCmd):
@@ -231,7 +260,8 @@ def ProcessActionStr(pname, action, vmCmd):
 		logging.error("Unknowing action")
 		
 def CheckVMProcess(vmcfg, vmCmd):
-		
+	print "\t Checking Processes"
+	logging.info("\t Checking Processes")		
 	vmProcessList = volatility.Check_ProcessName(vmcfg.GetVmName())
 	processMap = vmcfg.GetProcessMap()	
 	#pdb.set_trace()
@@ -241,9 +271,17 @@ def CheckVMProcess(vmcfg, vmCmd):
 		if k not in vmProcessList:
 			ProcessActionStr(k, v, vmCmd) 
 def CheckVMSystemCall(vmcfg, vmCmd):
+	print "\t Checking System call"	
+	logging.info("\t Checking System call")		
 	if volatility.Is_SystemCallHooked(vmcfg.GetVmName())	:
 		vmCmd.SetRestartVM()
 	   
+def CheckVMProcMemory(vmcfg, vmCmd):
+	print "\t Checking procs memory"
+	logging.info("\t Checking procs memory")
+
+	#need
+	volatility.Check_ProcessDump(vmcfg.GetVmName(), "sshd")
 if __name__ == "__main__":
     #config.add_help_hook(list_plugins)
     logging.basicConfig(level=logging.INFO, filename='csdvmm.log')
