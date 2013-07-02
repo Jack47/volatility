@@ -33,15 +33,13 @@ class linux_dump_proc_map(linux_common.AbstractLinuxCommand):
        # elif os.path.exists(self._config.OUTPUTFILE):
        #     debug.info("Cowardly refusing to overwrite an existing file")
 	#pdb.set_trace()
-	outfd =sys.stdout
-        outfd.write("Writing to file: {0}\n".format(self._config.OUTPUTFILE))
+	logging.info("Writing to file: {0}\n".format(self._config.OUTPUTFILE))
         outfile = open(self._config.OUTPUTFILE, "wb")
         size = 0
         for page in data:
             size += len(page)
             outfile.write(page)
         outfile.close()
-        outfd.write("Wrote {0} bytes\n".format(size))
 	logging.info("Wrote {0} bytes, in file {1}".format(size, self._config.OUTPUTFILE))
 
     def _calculate(self):
